@@ -60,21 +60,22 @@ export default function QuestionPhase({ question, onAnswer, sounds }) {
         <div className="absolute top-3 right-3 text-3xl">🫓</div>
         <div className="absolute top-3 left-3 text-3xl">🍷</div>
 
-        <h2 className="text-3xl font-bold text-white text-center leading-relaxed mt-6">
+        <h2 className="text-4xl font-extrabold text-white text-center leading-relaxed mt-6"
+            style={{ fontFamily: 'Rubik, Heebo, sans-serif', textShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
           {question.text}
         </h2>
 
         {/* Gesture hint */}
-        <div className="flex justify-center gap-12 mt-6">
+        <div className="flex justify-center gap-16 mt-8">
           <div className={`flex flex-col items-center transition-all ${detectedGesture === 'yes' ? 'scale-125' : ''}`}>
-            <div className={`text-5xl ${detectedGesture === 'yes' ? 'animate-bounce' : ''}`}>👆👇</div>
-            <span className="text-green-400 font-bold text-lg mt-2">נכון ✓</span>
-            <span className="text-purple-300 text-sm">הנהן בראש</span>
+            <div className={`text-4xl mb-1 ${detectedGesture === 'yes' ? 'animate-bounce' : ''}`}>👆👇</div>
+            <span className="text-green-400 font-extrabold text-xl" style={{ fontFamily: 'Rubik, sans-serif' }}>נכון ✓</span>
+            <span className="text-purple-200 text-base font-medium mt-1">הנהן בראש</span>
           </div>
           <div className={`flex flex-col items-center transition-all ${detectedGesture === 'no' ? 'scale-125' : ''}`}>
-            <div className={`text-5xl ${detectedGesture === 'no' ? 'animate-bounce' : ''}`}>👈👉</div>
-            <span className="text-red-400 font-bold text-lg mt-2">לא נכון ✗</span>
-            <span className="text-purple-300 text-sm">הנד בראש לצדדים</span>
+            <div className={`text-4xl mb-1 ${detectedGesture === 'no' ? 'animate-bounce' : ''}`}>👈👉</div>
+            <span className="text-red-400 font-extrabold text-xl" style={{ fontFamily: 'Rubik, sans-serif' }}>לא נכון ✗</span>
+            <span className="text-purple-200 text-base font-medium mt-1">הנד בראש לצדדים</span>
           </div>
         </div>
       </div>

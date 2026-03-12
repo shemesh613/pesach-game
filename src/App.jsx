@@ -86,8 +86,8 @@ function App() {
           <div className="w-full max-w-4xl mb-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="text-4xl">🫓</span>
-                <h1 className="text-2xl font-bold text-yellow-400">משחק הפסח</h1>
+                <span className="text-4xl drop-shadow-md">🫓</span>
+                <h1 className="text-3xl font-black text-yellow-400" style={{ fontFamily: 'Rubik, sans-serif', textShadow: '0 2px 8px rgba(251,191,36,0.3)' }}>משחק הפסח</h1>
               </div>
               <ScoreBoard
                 score={score}

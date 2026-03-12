@@ -7,10 +7,29 @@
 }
 
 body {
-  font-family: 'Segoe UI', 'Arial', sans-serif;
+  font-family: 'Heebo', 'Rubik', 'Segoe UI', 'Arial', sans-serif;
   direction: rtl;
   overflow: hidden;
   background: linear-gradient(135deg, #1a0533 0%, #2d1b69 50%, #1a0533 100%);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography scale for kids game — large, bold, readable */
+h1, h2, h3 { font-family: 'Rubik', 'Heebo', sans-serif; font-weight: 800; }
+button { font-family: 'Heebo', sans-serif; font-weight: 700; }
+
+/* Prevent emojis from overflowing text containers */
+.emoji-inline {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1;
+  font-size: 0.9em;
+}
+
+/* Better emoji sizing in all contexts */
+span[role="img"], .text-3xl, .text-4xl, .text-5xl, .text-6xl {
+  line-height: 1.2;
 }
 
 /* Stars animation */

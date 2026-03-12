@@ -212,35 +212,51 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
     eyeState
   } = useFaceThrow(stableHandleThrow, !ballFlying && throwsLeft > 0);
 
-  // Speech announcements
+  // Speech announcements — critical since player's eyes are closed!
   const prevChargingRef = useRef(false);
   const spokenPowerRef = useRef(0);
 
   useEffect(() => {
     if (isCharging && !prevChargingRef.current) {
-      speak('טוען כוח!');
+      speak('עיניים עצומות, טוען כוח!');
       spokenPowerRef.current = 0;
     }
     prevChargingRef.current = isCharging;
   }, [isCharging]);
 
-  // Announce power milestones + warn about overshoot
+  // Continuous audio feedback with detailed guidance
   useEffect(() => {
     if (!isCharging) return;
-    if (throwPower >= 0.4 && spokenPowerRef.current < 0.4) {
-      speak('חלש');
-      spokenPowerRef.current = 0.4;
-    } else if (throwPower >= 0.6 && spokenPowerRef.current < 0.6) {
-      speak('טוב!');
-      spokenPowerRef.current = 0.6;
-    } else if (throwPower >= 0.8 && spokenPowerRef.current < 0.8) {
-      speak('מצוין!');
-      spokenPowerRef.current = 0.8;
-    } else if (throwPower >= 0.92 && spokenPowerRef.current < 0.92) {
-      speak('זהירות! יותר מדי!');
-      spokenPowerRef.current = 0.92;
+    if (throwPower >= 0.25 && spokenPowerRef.current < 0.25) {
+      speak('חלש, תמשיך לעצום');
+      spokenPowerRef.current = 0.25;
+    } else if (throwPower >= 0.45 && spokenPowerRef.current < 0.45) {
+      speak('עוד קצת');
+      spokenPowerRef.current = 0.45;
+    } else if (throwPower >= 0.55 && spokenPowerRef.current < 0.55) {
+      speak('נכנס לאזור הירוק!');
+      spokenPowerRef.current = 0.55;
+    } else if (throwPower >= 0.7 && spokenPowerRef.current < 0.7) {
+      speak('מושלם! פקח עיניים עכשיו!');
+      spokenPowerRef.current = 0.7;
+    } else if (throwPower >= 0.85 && spokenPowerRef.current < 0.85) {
+      speak('זהירות! יוצא מהאזור הירוק!');
+      spokenPowerRef.current = 0.85;
+    } else if (throwPower >= 0.95 && spokenPowerRef.current < 0.95) {
+      speak('חזק מדי! יעוף מעבר לאש!');
+      spokenPowerRef.current = 0.95;
     }
   }, [throwPower, isCharging]);
+
+  // Announce result with explanation
+  const announceResult = useCallback((points, power) => {
+    if (points >= 100) speak('מושלם! ישירות לתוך האש! מאה נקודות!');
+    else if (points >= 50) speak('יפה מאוד! קרוב לאש! חמישים נקודות!');
+    else if (points >= 25) speak('לא רע! עשרים וחמש נקודות!');
+    else if (points >= 10) speak('כמעט הגעת! עשר נקודות!');
+    else if (power > 0.85) speak('החטאת! עצמת עיניים יותר מדי זמן, הזריקה עפה מעבר לאש!');
+    else speak('החטאת! צריך לעצום עיניים יותר זמן, הזריקה הייתה חלשה מדי!');
+  }, []);
 
   // Calculate landing: power controls distance along the line to fire
   // Sweet spot ~60-80%. Under = short, over = overshoot past fire
@@ -320,12 +336,7 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
       const { points, label } = checkScore(landing.x, landing.y);
 
       sounds.playHit(points);
-      // Announce result
-      if (points >= 100) speak('מושלם! ישירות לאש!');
-      else if (points >= 50) speak('יפה מאוד!');
-      else if (points >= 25) speak('לא רע!');
-      else if (points >= 10) speak('כמעט!');
-      else speak('החטאת!');
+      announceResult(points, power);
 
       setScore(prev => prev + points);
       setLastHit({ x: landing.x, y: landing.y, points, label, time: Date.now() });
@@ -335,7 +346,7 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
         if (next <= 0) {
           setTimeout(() => { speak('המשחק נגמר! כל הכבוד!'); setShowResult(true); }, 1500);
         } else {
-          // Spawn new chametz at different position
+          setTimeout(() => speak(`נשארו ${next} זריקות`), 2000);
           setChametzPos(randomChametzPos());
         }
         return next;
@@ -343,7 +354,7 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
 
       setBallFlying(false);
     }, FLY_DURATION_MS + 200);
-  }, [ballFlying, throwsLeft, chametzPos, sounds, calcLandingPos, checkScore]);
+  }, [ballFlying, throwsLeft, chametzPos, sounds, calcLandingPos, checkScore, announceResult]);
 
   // Keep handleThrowRef in sync
   useEffect(() => {
