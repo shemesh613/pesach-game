@@ -1,11 +1,10 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 
-const BLINK_THRESHOLD = 0.4;
-const MOUTH_THRESHOLD = 0.3;
-const CHARGE_RATE = 0.007; // slower charge (~2.5s to full at 60fps)
-const MOUTH_BOOST = 1.8;
-const MIN_POWER_TO_THROW = 0.15;
-const BLINK_DEBOUNCE_MS = 500; // ignore blinks shorter than this
+const BLINK_THRESHOLD = 0.4; // eye closed threshold
+const CHARGE_RATE = 0.012; // ~1.4s to full at 60fps — fast enough for kids
+const MIN_POWER_TO_THROW = 0.1;
+const BLINK_DEBOUNCE_MS = 400; // ignore blinks shorter than this
+const EYE_SMOOTHING = 0.3;
 
 export function useFaceThrow(onThrow, isActive) {
   const faceLandmarkerRef = useRef(null);
@@ -14,19 +13,17 @@ export function useFaceThrow(onThrow, isActive) {
   const animFrameRef = useRef(null);
   const chargingRef = useRef(false);
   const powerRef = useRef(0);
-  const directionRef = useRef('center');
-  const mouthOpenRef = useRef(false);
   const cooldownRef = useRef(false);
   const onThrowCallbackRef = useRef(onThrow);
-  const eyeClosedSinceRef = useRef(null); // timestamp when eyes first closed
-  const blinkDebouncePassedRef = useRef(false); // true once 500ms passed
+  const eyeClosedSinceRef = useRef(null);
+  const blinkDebouncePassedRef = useRef(false);
+  const smoothLeftRef = useRef(0);
+  const smoothRightRef = useRef(0);
 
   const [isLoading, setIsLoading] = useState(true);
   const [power, setPower] = useState(0);
-  const [direction, setDirection] = useState('center');
   const [isCharging, setIsCharging] = useState(false);
   const [isWaitingDebounce, setIsWaitingDebounce] = useState(false);
-  const [mouthOpen, setMouthOpen] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
   const [eyeState, setEyeState] = useState({ left: 0, right: 0 });
 
@@ -99,30 +96,31 @@ export function useFaceThrow(onThrow, isActive) {
           return s ? s.score : 0;
         };
 
-        const leftBlink = getShape('eyeBlinkLeft');
-        const rightBlink = getShape('eyeBlinkRight');
-        const jawOpen = getShape('jawOpen');
+        const rawLeft = getShape('eyeBlinkLeft');
+        const rawRight = getShape('eyeBlinkRight');
+
+        // Smooth
+        const alpha = 1 - EYE_SMOOTHING;
+        smoothLeftRef.current += (rawLeft - smoothLeftRef.current) * alpha;
+        smoothRightRef.current += (rawRight - smoothRightRef.current) * alpha;
+
+        const leftBlink = smoothLeftRef.current;
+        const rightBlink = smoothRightRef.current;
 
         setEyeState({ left: leftBlink, right: rightBlink });
 
-        const leftClosed = leftBlink > BLINK_THRESHOLD;
-        const rightClosed = rightBlink > BLINK_THRESHOLD;
-        const isMouthOpen = jawOpen > MOUTH_THRESHOLD;
-        setMouthOpen(isMouthOpen);
-
-        const anyEyeClosed = leftClosed || rightClosed;
+        // Either eye closed = charging (simple!)
+        const anyEyeClosed = leftBlink > BLINK_THRESHOLD || rightBlink > BLINK_THRESHOLD;
 
         if (isActive && !cooldownRef.current) {
           if (anyEyeClosed) {
             const now = Date.now();
 
-            // Start tracking when eyes first closed
             if (eyeClosedSinceRef.current === null) {
               eyeClosedSinceRef.current = now;
               setIsWaitingDebounce(true);
             }
 
-            // Check if debounce period passed (not a blink)
             if (!blinkDebouncePassedRef.current) {
               if (now - eyeClosedSinceRef.current >= BLINK_DEBOUNCE_MS) {
                 blinkDebouncePassedRef.current = true;
@@ -130,79 +128,48 @@ export function useFaceThrow(onThrow, isActive) {
                 chargingRef.current = true;
                 powerRef.current = 0;
               }
-              // Still waiting for debounce - don't charge yet
             }
 
             if (blinkDebouncePassedRef.current) {
-              // Determine direction
-              if (leftClosed && !rightClosed) {
-                directionRef.current = 'left';
-              } else if (rightClosed && !leftClosed) {
-                directionRef.current = 'right';
-              } else {
-                directionRef.current = 'center';
-              }
-
-              // Charge power
-              const rate = isMouthOpen ? CHARGE_RATE * MOUTH_BOOST : CHARGE_RATE;
-              powerRef.current = Math.min(powerRef.current + rate, 1);
-
+              powerRef.current = Math.min(powerRef.current + CHARGE_RATE, 1);
               setPower(powerRef.current);
-              setDirection(directionRef.current);
               setIsCharging(true);
             }
 
           } else {
-            // Eyes opened
+            // Eyes opened — release!
             if (blinkDebouncePassedRef.current && chargingRef.current) {
-              // Real charge was happening — RELEASE throw!
               chargingRef.current = false;
               setIsCharging(false);
               setIsWaitingDebounce(false);
 
               if (powerRef.current >= MIN_POWER_TO_THROW) {
-                let angleOffset = 0;
-                if (directionRef.current === 'left') angleOffset = -0.4;
-                else if (directionRef.current === 'right') angleOffset = 0.4;
-
-                const spread = mouthOpenRef.current ? 0.05 : 0.2;
-                const randomSpread = (Math.random() - 0.5) * spread;
-
                 cooldownRef.current = true;
                 setTimeout(() => { cooldownRef.current = false; }, 1200);
 
                 if (onThrowCallbackRef.current) {
                   onThrowCallbackRef.current({
-                    power: powerRef.current,
-                    angle: angleOffset + randomSpread,
-                    mouthBoost: mouthOpenRef.current
+                    power: powerRef.current
                   });
                 }
               }
 
               powerRef.current = 0;
               setPower(0);
-              setDirection('center');
             } else {
-              // Blink detected (debounce didn't pass) — ignore
               setIsWaitingDebounce(false);
               setIsCharging(false);
             }
 
-            // Reset debounce tracking
             eyeClosedSinceRef.current = null;
             blinkDebouncePassedRef.current = false;
-
-            mouthOpenRef.current = isMouthOpen;
           }
-
-          mouthOpenRef.current = isMouthOpen;
         }
       } else {
         setFaceDetected(false);
       }
 
-      // Draw landmarks on canvas
+      // Draw eye highlights on canvas
       if (canvasRef.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
         const ctx = canvasRef.current.getContext('2d');
         const w = canvasRef.current.width;
@@ -223,18 +190,10 @@ export function useFaceThrow(onThrow, isActive) {
           ctx.stroke();
         };
 
-        const leftColor = eyeState.left > BLINK_THRESHOLD ? '#ef4444' : '#22c55e';
-        const rightColor = eyeState.right > BLINK_THRESHOLD ? '#ef4444' : '#22c55e';
+        const leftColor = smoothLeftRef.current > BLINK_THRESHOLD ? '#ef4444' : '#22c55e';
+        const rightColor = smoothRightRef.current > BLINK_THRESHOLD ? '#ef4444' : '#22c55e';
         drawEye([33, 160, 158, 133, 153, 144], leftColor);
         drawEye([362, 385, 387, 263, 373, 380], rightColor);
-
-        if (mouthOpen) {
-          ctx.beginPath();
-          const mouthPt = landmarks[13];
-          ctx.arc(mouthPt.x * w, mouthPt.y * h + 10, 8, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(251, 191, 36, 0.6)';
-          ctx.fill();
-        }
       }
     } catch (e) {
       // Silently handle
@@ -269,10 +228,8 @@ export function useFaceThrow(onThrow, isActive) {
     isLoading,
     faceDetected,
     power,
-    direction,
     isCharging,
     isWaitingDebounce,
-    mouthOpen,
     eyeState
   };
 }

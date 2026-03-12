@@ -1,6 +1,18 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useFaceThrow } from '../hooks/useFaceThrow';
 
+// Hebrew speech announcer (non-blocking, cancels previous)
+function speak(text) {
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'he-IL';
+    utter.rate = 1.2;
+    utter.volume = 0.9;
+    window.speechSynthesis.speak(utter);
+  } catch (e) {}
+}
+
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
@@ -195,35 +207,57 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
     isLoading: faceLoading,
     faceDetected,
     power: throwPower,
-    direction: throwDirection,
     isCharging,
     isWaitingDebounce,
-    mouthOpen,
     eyeState
   } = useFaceThrow(stableHandleThrow, !ballFlying && throwsLeft > 0);
 
-  // Calculate where chametz lands based on power, direction, mouthBoost, and distance
-  const calcLandingPos = useCallback((fromX, fromY, power, angle, mouthBoost) => {
+  // Speech announcements
+  const prevChargingRef = useRef(false);
+  const spokenPowerRef = useRef(0);
+
+  useEffect(() => {
+    if (isCharging && !prevChargingRef.current) {
+      speak('טוען כוח!');
+      spokenPowerRef.current = 0;
+    }
+    prevChargingRef.current = isCharging;
+  }, [isCharging]);
+
+  // Announce power milestones + warn about overshoot
+  useEffect(() => {
+    if (!isCharging) return;
+    if (throwPower >= 0.4 && spokenPowerRef.current < 0.4) {
+      speak('חלש');
+      spokenPowerRef.current = 0.4;
+    } else if (throwPower >= 0.6 && spokenPowerRef.current < 0.6) {
+      speak('טוב!');
+      spokenPowerRef.current = 0.6;
+    } else if (throwPower >= 0.8 && spokenPowerRef.current < 0.8) {
+      speak('מצוין!');
+      spokenPowerRef.current = 0.8;
+    } else if (throwPower >= 0.92 && spokenPowerRef.current < 0.92) {
+      speak('זהירות! יותר מדי!');
+      spokenPowerRef.current = 0.92;
+    }
+  }, [throwPower, isCharging]);
+
+  // Calculate landing: power controls distance along the line to fire
+  // Sweet spot ~60-80%. Under = short, over = overshoot past fire
+  const calcLandingPos = useCallback((fromX, fromY, power) => {
     const dist = Math.sqrt((fromX - FIRE_X) ** 2 + (fromY - FIRE_Y) ** 2);
-
-    // Effective reach: how far the chametz can travel toward fire
-    // power 1.0 + mouthBoost = can cover full distance
-    // power 1.0 without mouth = covers ~70% of distance
-    // power 0.5 = covers ~35% of distance
-    const reachFactor = mouthBoost ? power * 1.0 : power * 0.7;
-    const travelDist = dist * reachFactor;
-
-    // Direction from chametz to fire
     const dirAngle = Math.atan2(FIRE_Y - fromY, FIRE_X - fromX);
-    // Apply left/right offset
-    const finalAngle = dirAngle + angle * 0.5;
 
-    // Landing position
-    let landX = fromX + Math.cos(finalAngle) * travelDist;
-    let landY = fromY + Math.sin(finalAngle) * travelDist;
+    // Power mapping: 0.7 power = lands exactly at fire center
+    // Below 0.7 = falls short, above 0.7 = overshoots past fire
+    const sweetSpot = 0.7;
+    const travelDist = (power / sweetSpot) * dist;
 
-    // Add some random scatter (less with mouth boost)
-    const scatter = mouthBoost ? 15 : 35;
+    let landX = fromX + Math.cos(dirAngle) * travelDist;
+    let landY = fromY + Math.sin(dirAngle) * travelDist;
+
+    // Small random scatter
+    const scatter = 20;
     landX += (Math.random() - 0.5) * scatter;
     landY += (Math.random() - 0.5) * scatter;
 
@@ -257,13 +291,14 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
   }, []);
 
   // Handle throw
-  const handleThrow = useCallback(({ power, angle, mouthBoost }) => {
+  const handleThrow = useCallback(({ power }) => {
     if (ballFlying || throwsLeft <= 0 || !chametzPos) return;
 
     sounds.playThrow();
+    speak('זורק!');
     setBallFlying(true);
 
-    const landing = calcLandingPos(chametzPos.x, chametzPos.y, power, angle, mouthBoost);
+    const landing = calcLandingPos(chametzPos.x, chametzPos.y, power);
     const arcHeight = Math.sqrt((chametzPos.x - landing.x) ** 2 + (chametzPos.y - landing.y) ** 2) * 0.4;
 
     // Start fly animation
@@ -285,13 +320,20 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
       const { points, label } = checkScore(landing.x, landing.y);
 
       sounds.playHit(points);
+      // Announce result
+      if (points >= 100) speak('מושלם! ישירות לאש!');
+      else if (points >= 50) speak('יפה מאוד!');
+      else if (points >= 25) speak('לא רע!');
+      else if (points >= 10) speak('כמעט!');
+      else speak('החטאת!');
+
       setScore(prev => prev + points);
       setLastHit({ x: landing.x, y: landing.y, points, label, time: Date.now() });
 
       setThrowsLeft(prev => {
         const next = prev - 1;
         if (next <= 0) {
-          setTimeout(() => setShowResult(true), 1500);
+          setTimeout(() => { speak('המשחק נגמר! כל הכבוד!'); setShowResult(true); }, 1500);
         } else {
           // Spawn new chametz at different position
           setChametzPos(randomChametzPos());
@@ -312,11 +354,7 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
   useEffect(() => {
     const handleKey = (e) => {
       if (e.code === 'Space' && !ballFlying && throwsLeft > 0) {
-        handleThrow({
-          power: 0.6 + Math.random() * 0.4,
-          angle: (Math.random() - 0.5) * 0.5,
-          mouthBoost: Math.random() > 0.5
-        });
+        handleThrow({ power: 0.5 + Math.random() * 0.5 });
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -380,12 +418,13 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
         ctx.textAlign = 'center';
         ctx.fillText('🍞 זרוק אותי!', chametzPos.x, chametzPos.y - 35);
 
-        // Draw aiming line when charging
+        // Draw aiming line — straight to fire, length = power
         if (isCharging && throwPower > 0) {
-          const previewAngle = throwDirection === 'left' ? -0.2 :
-                               throwDirection === 'right' ? 0.2 : 0;
-          const dirAngle = Math.atan2(FIRE_Y - chametzPos.y, FIRE_X - chametzPos.x) + previewAngle;
-          const lineLen = 40 + throwPower * 80;
+          const dirAngle = Math.atan2(FIRE_Y - chametzPos.y, FIRE_X - chametzPos.x);
+          const dist = Math.sqrt((chametzPos.x - FIRE_X) ** 2 + (chametzPos.y - FIRE_Y) ** 2);
+          // Show where it would land: power/0.7 * dist (matching calcLandingPos)
+          const previewDist = Math.min((throwPower / 0.7) * dist, dist * 1.5);
+          const lineLen = Math.min(previewDist, 300);
 
           ctx.beginPath();
           ctx.moveTo(chametzPos.x, chametzPos.y);
@@ -393,19 +432,34 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
             chametzPos.x + Math.cos(dirAngle) * lineLen,
             chametzPos.y + Math.sin(dirAngle) * lineLen
           );
-          ctx.strokeStyle = `rgba(251, 191, 36, ${0.4 + throwPower * 0.6})`;
+          // Green in sweet spot (0.55-0.85), yellow outside, red if overshoot
+          const inSweet = throwPower >= 0.55 && throwPower <= 0.85;
+          const isOver = throwPower > 0.85;
+          const arrowColor = inSweet
+            ? `rgba(34, 197, 94, ${0.5 + throwPower * 0.5})`
+            : isOver
+            ? `rgba(239, 68, 68, ${0.5 + throwPower * 0.5})`
+            : `rgba(251, 191, 36, ${0.4 + throwPower * 0.5})`;
+          ctx.strokeStyle = arrowColor;
           ctx.lineWidth = 3;
           ctx.setLineDash([8, 4]);
           ctx.stroke();
           ctx.setLineDash([]);
 
-          // Arrowhead
+          // Landing preview dot
           const tipX = chametzPos.x + Math.cos(dirAngle) * lineLen;
           const tipY = chametzPos.y + Math.sin(dirAngle) * lineLen;
           ctx.beginPath();
           ctx.arc(tipX, tipY, 6 + throwPower * 8, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(251, 191, 36, ${0.5 + throwPower * 0.5})`;
+          ctx.fillStyle = arrowColor;
           ctx.fill();
+
+          // Power label at tip
+          ctx.font = 'bold 13px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = arrowColor;
+          const label = isOver ? '⚠️ חזק מדי!' : inSweet ? '✅ מושלם!' : '💪 עוד קצת...';
+          ctx.fillText(label, tipX, tipY - 18);
         }
       }
 
@@ -483,7 +537,7 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
     return () => {
       if (renderRef.current) cancelAnimationFrame(renderRef.current);
     };
-  }, [chametzPos, lastHit, ballFlying, throwsLeft, isCharging, throwPower, throwDirection]);
+  }, [chametzPos, lastHit, ballFlying, throwsLeft, isCharging, throwPower]);
 
   // End screen
   if (showResult) {
@@ -579,47 +633,53 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
              '👤 הסתכל למצלמה'}
           </div>
 
-          {/* Eye state indicators */}
-          <div className="flex gap-4 text-center">
-            <div className={`px-3 py-1 rounded-lg text-sm ${
-              eyeState.left > 0.4 ? 'bg-red-500/30 border border-red-400/50 text-red-300' : 'bg-purple-800/40 text-purple-300'
-            }`}>
-              👁️ שמאל {eyeState.left > 0.4 ? '(עצומה)' : '(פתוחה)'}
-            </div>
-            <div className={`px-3 py-1 rounded-lg text-sm ${
-              eyeState.right > 0.4 ? 'bg-red-500/30 border border-red-400/50 text-red-300' : 'bg-purple-800/40 text-purple-300'
-            }`}>
-              👁️ ימין {eyeState.right > 0.4 ? '(עצומה)' : '(פתוחה)'}
-            </div>
+          {/* Eye state */}
+          <div className={`px-4 py-2 rounded-xl text-sm font-bold text-center ${
+            eyeState.left > 0.4 || eyeState.right > 0.4
+              ? 'bg-red-500/30 border border-red-400/50 text-red-300'
+              : 'bg-purple-800/40 text-purple-300'
+          }`}>
+            {eyeState.left > 0.4 || eyeState.right > 0.4 ? '😑 עיניים עצומות' : '👀 עיניים פתוחות'}
           </div>
 
-          {/* Power meter */}
+          {/* Power meter — with sweet spot indicator */}
           <div className="w-full bg-purple-900/60 rounded-xl px-4 py-3 border border-orange-400/30">
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm font-bold text-orange-200">
-                {isWaitingDebounce ? '⏳ ...ממתין' :
-                 isCharging ? '🔥 ...טוען כוח' : '👁️ עצום עיניים לטעון'}
+                {isWaitingDebounce ? '⏳ ממתין...' :
+                 isCharging ? '🔥 טוען כוח!' : '👁️ עצום עיניים!'}
               </span>
               <span className="text-sm text-yellow-400 font-bold">{Math.round(throwPower * 100)}%</span>
             </div>
-            <div className="w-full h-5 bg-purple-800/50 rounded-full overflow-hidden">
+            {/* Power bar with sweet spot zone marked */}
+            <div className="relative w-full h-6 bg-purple-800/50 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-100"
                 style={{
                   width: `${throwPower * 100}%`,
-                  background: throwPower < 0.3
-                    ? 'linear-gradient(90deg, #3b82f6, #60a5fa)'
-                    : throwPower < 0.7
-                    ? 'linear-gradient(90deg, #f97316, #fbbf24)'
-                    : 'linear-gradient(90deg, #ef4444, #f97316)'
+                  background: throwPower < 0.55
+                    ? 'linear-gradient(90deg, #3b82f6, #60a5fa)'  // blue = too weak
+                    : throwPower <= 0.85
+                    ? 'linear-gradient(90deg, #22c55e, #4ade80)'  // green = sweet spot!
+                    : 'linear-gradient(90deg, #ef4444, #f97316)'  // red = too strong!
                 }}
               />
+              {/* Sweet spot zone markers */}
+              <div className="absolute top-0 h-full border-l-2 border-green-400/60" style={{ left: '55%' }} />
+              <div className="absolute top-0 h-full border-l-2 border-green-400/60" style={{ left: '85%' }} />
+              <div className="absolute top-0 h-full flex items-center justify-center text-[9px] text-green-300/80 font-bold pointer-events-none" style={{ left: '55%', width: '30%' }}>
+                🎯
+              </div>
             </div>
             {isCharging && (
-              <div className="text-xs text-center mt-1 text-purple-300">
-                {throwDirection === 'left' ? '⬅️ שמאל' :
-                 throwDirection === 'right' ? '➡️ ימין' : '🎯 מרכז'}
-                {mouthOpen && ' | 😮 בוסט כוח!'}
+              <div className={`text-xs text-center mt-1 font-bold ${
+                throwPower < 0.55 ? 'text-blue-300' :
+                throwPower <= 0.85 ? 'text-green-300' :
+                'text-red-300 animate-pulse'
+              }`}>
+                {throwPower < 0.55 ? '💪 עוד קצת...' :
+                 throwPower <= 0.85 ? '✅ מושלם! פקח עיניים!' :
+                 '⚠️ חזק מדי! שחרר מהר!'}
               </div>
             )}
             {isWaitingDebounce && (
@@ -633,12 +693,10 @@ export default function BallTossGame({ onGameEnd, initialScore, sounds }) {
           <div className="bg-purple-900/60 backdrop-blur-sm rounded-xl p-3 border border-purple-400/30 text-center">
             <div className="text-base font-bold text-yellow-400 mb-2">?איך זורקים</div>
             <div className="space-y-1.5 text-xs text-purple-200">
-              <div>👁️ עצום עיניים חצי שנייה = טעינת כוח</div>
-              <div>👁️ עין שמאל = זריקה שמאלה</div>
-              <div>👁️ עין ימין = זריקה ימינה</div>
-              <div>👀 שתי עיניים = זריקה למרכז</div>
-              <div>😮 פה פתוח = בוסט כוח!</div>
-              <div className="text-yellow-300 font-bold">פקח עיניים = שחרר זריקה!</div>
+              <div>😑 עצום עיניים חצי שנייה = <span className="text-yellow-300">טעינת כוח</span></div>
+              <div>🟢 ירוק = כוח מושלם (55-85%)</div>
+              <div>🔴 אדום = חזק מדי! יעוף מעבר לאש</div>
+              <div className="text-yellow-300 font-bold mt-1">👀 פקח עיניים = שחרר זריקה!</div>
             </div>
           </div>
 
